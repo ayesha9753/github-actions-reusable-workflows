@@ -1,0 +1,27 @@
+name: Deploy
+
+# Example caller: deploy this repo to a VPS over SSH whenever main is
+# pushed (or on demand), with an HTTP health check afterwards.
+# Requires one repository secret: SSH_PRIVATE_KEY.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ayesha9753/github-actions-reusable-workflows/.github/workflows/reusable-deploy-ssh.yml@main
+    with:
+      host: example.com
+      user: deploy
+      deploy-path: /srv/my-app
+      restart-command: "docker compose up -d"
+      health-url: https://example.com/health
+    secrets:
+      # workflow_call secrets are declared explicitly on the reusable
+      # side, so the caller maps its own secret by name.
+      ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}

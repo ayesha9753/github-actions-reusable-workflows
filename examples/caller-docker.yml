@@ -1,0 +1,24 @@
+name: Docker CI
+
+# Example caller: build, Trivy-scan and push this repo's Docker image
+# using the reusable workflow. Copy into .github/workflows/ of any repo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write # needed so the reusable workflow can push to GHCR
+
+jobs:
+  docker:
+    uses: ayesha9753/github-actions-reusable-workflows/.github/workflows/reusable-docker-build.yml@main
+    with:
+      image-name: my-app
+      context: .
+      dockerfile: Dockerfile
+      # Push only on real pushes to main, never from pull requests.
+      push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    secrets: inherit

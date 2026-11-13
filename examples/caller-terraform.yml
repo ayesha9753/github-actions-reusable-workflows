@@ -1,0 +1,37 @@
+name: Terraform
+
+# Example caller: plan on pull requests, apply only from main.
+# Requires an IAM role trusted by GitHub's OIDC provider — no AWS
+# access keys are stored anywhere.
+
+on:
+  pull_request:
+    paths: ["infra/**"]
+  push:
+    branches: [main]
+    paths: ["infra/**"]
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC authentication to AWS
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    uses: ayesha9753/github-actions-reusable-workflows/.github/workflows/reusable-terraform.yml@main
+    with:
+      working-directory: infra
+      terraform-version: "1.9.5"
+      aws-region: eu-west-1
+      role-to-assume: arn:aws:iam::123456789012:role/github-actions-terraform
+      command: plan
+
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ayesha9753/github-actions-reusable-workflows/.github/workflows/reusable-terraform.yml@main
+    with:
+      working-directory: infra
+      terraform-version: "1.9.5"
+      aws-region: eu-west-1
+      role-to-assume: arn:aws:iam::123456789012:role/github-actions-terraform
+      command: apply

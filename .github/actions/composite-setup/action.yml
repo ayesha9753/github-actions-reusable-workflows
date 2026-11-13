@@ -1,0 +1,41 @@
+name: setup-python-app
+description: >-
+  Set up Python with pip caching and install dependencies from
+  requirements.txt when the file is present.
+author: Ayesha Imran
+
+inputs:
+  python-version:
+    description: "Python version to install"
+    required: false
+    default: "3.12"
+  requirements-file:
+    description: "Path to the requirements file to install (skipped if missing)"
+    required: false
+    default: "requirements.txt"
+
+outputs:
+  python-version:
+    description: "The Python version that was set up"
+    value: ${{ steps.setup.outputs.python-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      id: setup
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+        cache-dependency-path: ${{ inputs.requirements-file }}
+
+    - name: Install dependencies (if requirements file exists)
+      shell: bash
+      run: |
+        if [ -f "${{ inputs.requirements-file }}" ]; then
+          python -m pip install --upgrade pip
+          pip install -r "${{ inputs.requirements-file }}"
+        else
+          echo "No ${{ inputs.requirements-file }} found — skipping dependency install."
+        fi
