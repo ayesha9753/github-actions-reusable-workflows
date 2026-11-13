@@ -1,0 +1,104 @@
+name: Reusable — Deploy over SSH with Health Check
+
+# Reusable workflow: deploy to a server over SSH, run a restart command,
+# then verify the deployment with an HTTP health-check loop. The job
+# FAILS if the health check never succeeds, so a broken deploy is loud.
+#
+# Caller example:
+#   jobs:
+#     deploy:
+#       uses: ayesha9753/github-actions-reusable-workflows/.github/workflows/reusable-deploy-ssh.yml@main
+#       with:
+#         host: example.com
+#         user: deploy
+#         deploy-path: /srv/my-app
+#         restart-command: "docker compose up -d"
+#         health-url: https://example.com/health
+#       secrets:
+#         ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      host:
+        description: "Target server hostname or IP"
+        required: true
+        type: string
+      user:
+        description: "SSH user on the target server"
+        required: true
+        type: string
+      deploy-path:
+        description: "Directory on the server to deploy into"
+        required: true
+        type: string
+      restart-command:
+        description: "Command to run on the server after syncing files (e.g. a compose restart)"
+        required: true
+        type: string
+      health-url:
+        description: "URL polled after deployment; the job fails unless it returns HTTP 200"
+        required: true
+        type: string
+      health-retries:
+        description: "How many times to poll the health URL (10s apart)"
+        required: false
+        type: number
+        default: 12
+    secrets:
+      # workflow_call secrets must be declared explicitly — unlike
+      # `secrets: inherit`, only the secrets listed here are available.
+      ssh-key:
+        description: "Private SSH key for the deploy user on the target server"
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.host }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the caller repository
+        uses: actions/checkout@v4
+
+      - name: Install SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.ssh-key }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ inputs.host }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync files to the server
+        shell: bash
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude '.git/' \
+            ./ "${{ inputs.user }}@${{ inputs.host }}:${{ inputs.deploy-path }}/"
+
+      - name: Restart the application on the server
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ inputs.user }}@${{ inputs.host }}" \
+            "cd '${{ inputs.deploy-path }}' && ${{ inputs.restart-command }}"
+
+      - name: Health check
+        shell: bash
+        run: |
+          echo "Polling ${{ inputs.health-url }} (up to ${{ inputs.health-retries }} attempts, 10s apart)..."
+          for i in $(seq 1 "${{ inputs.health-retries }}"); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${{ inputs.health-url }}" || echo "000")
+            echo "Attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Health check failed — ${{ inputs.health-url }} never returned HTTP 200."
+          exit 1
+
+      - name: Remove SSH key
+        if: always()
+        shell: bash
+        run: rm -f ~/.ssh/deploy_key
