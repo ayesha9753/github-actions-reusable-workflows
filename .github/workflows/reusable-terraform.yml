@@ -1,0 +1,99 @@
+name: Reusable — Terraform Plan / Apply (AWS via OIDC)
+
+# Reusable workflow: run Terraform against AWS using short-lived OIDC
+# credentials — no long-lived AWS access keys stored as secrets.
+#
+# Caller example:
+#   jobs:
+#     terraform:
+#       uses: ayesha9753/github-actions-reusable-workflows/.github/workflows/reusable-terraform.yml@main
+#       with:
+#         working-directory: infra
+#         aws-region: eu-west-1
+#         role-to-assume: arn:aws:iam::123456789012:role/github-actions-terraform
+#         command: plan
+#       permissions:
+#         contents: read
+#         id-token: write   # required for OIDC
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Directory containing the Terraform configuration"
+        required: false
+        type: string
+        default: "."
+      terraform-version:
+        description: "Terraform version to install"
+        required: false
+        type: string
+        default: "1.9.5"
+      aws-region:
+        description: "AWS region for the provider / backend"
+        required: true
+        type: string
+      role-to-assume:
+        description: "ARN of the IAM role to assume via OIDC"
+        required: true
+        type: string
+      command:
+        description: "Terraform command to run: plan or apply"
+        required: false
+        type: string
+        default: "plan"
+    outputs:
+      plan-outcome:
+        description: "Result of the terraform plan step"
+        value: ${{ jobs.terraform.outputs.plan-outcome }}
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.command }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    outputs:
+      plan-outcome: ${{ steps.plan.outcome }}
+    steps:
+      - name: Check out the caller repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ github.run_id }}
+          path: ${{ inputs.working-directory }}/tfplan
+          retention-days: 7
+
+      - name: Terraform apply
+        # Double guard: only when the caller explicitly asked for apply
+        # AND the run is on the main branch.
+        if: inputs.command == 'apply' && github.ref == 'refs/heads/main'
+        run: terraform apply -input=false -auto-approve tfplan
